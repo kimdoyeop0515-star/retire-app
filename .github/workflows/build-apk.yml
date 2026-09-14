@@ -20,34 +20,49 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Setup Gradle 8.6
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.6'
 
-      - name: Accept SDK licenses & create local.properties
+      - name: Setup Android SDK licenses
         run: |
-          yes | sdkmanager --licenses 2>/dev/null || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" 2>&1 | tail -5
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$SDK"
+          ls "$SDK" 2>/dev/null || echo "SDK 경로 없음"
+          mkdir -p "$SDK/licenses"
+          printf '\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n' > "$SDK/licenses/android-sdk-license"
+          printf '\n84831b9409646a918e30573bab4c9c91346d8abd\n' > "$SDK/licenses/android-sdk-preview-license"
+          echo "sdk.dir=$SDK" > local.properties
           cat local.properties
 
-      - name: Check project files
+      - name: Install SDK components
         run: |
-          echo "=== Project files ==="
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          if [ -f "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" \
+              "platforms;android-34" \
+              "build-tools;34.0.0" 2>&1 | tail -5
+          else
+            echo "sdkmanager not found, using pre-installed"
+            ls "$SDK/platforms/" 2>/dev/null
+            ls "$SDK/build-tools/" 2>/dev/null
+          fi
+
+      - name: Verify project
+        run: |
+          echo "=== build.gradle.kts ==="
           cat build.gradle.kts
-          echo "---"
-          cat settings.gradle.kts
-          echo "---"
+          echo "=== app/build.gradle.kts ==="
           cat app/build.gradle.kts
           echo "=== app.html size ==="
           wc -c app/src/main/assets/app.html
+          echo "=== MainActivity ==="
+          wc -l app/src/main/java/com/retireplanner/app/MainActivity.kt
 
       - name: Build Debug APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: |
+          gradle assembleDebug --no-daemon --stacktrace 2>&1
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
@@ -58,8 +73,8 @@ jobs:
           if [ -f "$APK" ]; then
             echo "SUCCESS: $(du -sh $APK)"
           else
-            echo "FAILED"
-            find . -name "*.apk" 2>/dev/null
+            echo "FAILED - APK not found"
+            find . -name "*.apk" 2>/dev/null || true
             exit 1
           fi
 
@@ -76,7 +91,7 @@ jobs:
         with:
           tag_name: v1.${{ github.run_number }}
           name: "은퇴투자 시뮬레이터 APK"
-          body: "설치 방법: 파일 다운로드 → 설치 → 출처 알 수 없는 앱 허용"
+          body: "app-debug.apk 다운로드 후 설치"
           files: app/build/outputs/apk/debug/app-debug.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
